@@ -110,6 +110,8 @@ dialog .grow { flex: 1; }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
 .count { font-variant-numeric: tabular-nums; }
+.theme { font-size: 12.5px; }
+.theme:hover { color: var(--fg); }
 .del { font-size: 12.5px; }
 .del:hover, .del.sure { color: #c0392b; }
 
@@ -228,6 +230,7 @@ dialog .grow { flex: 1; }
         <button data-f="off">Tout</button><button data-f="sentence">Phrase</button><button data-f="paragraph">Paragraphe</button>
       </div>
       <span class="grow"></span>
+      <button class="theme" id="theme" title="Changer de thème"></button>
       <span class="count" id="count"></span>
       <button class="del" id="del">Supprimer</button>
     </div>
@@ -552,6 +555,23 @@ dialog .grow { flex: 1; }
     r.readAsText(f);
   };
   $('bkPaste').onclick = () => { const t = $('bkText').value.trim(); if (!t) return bkMsg('Collez d\'abord le texte d\'une sauvegarde dans la zone ci-dessus.', true); restore(t); };
+
+  /* ---------- theme ---------- */
+  const THEMES = { auto: 'Thème : auto', light: 'Thème : clair', dark: 'Thème : sombre' };
+  const root = document.documentElement, hostTheme = root.getAttribute('data-theme');
+  function applyTheme() {
+    const t = THEMES[state.theme] ? state.theme : 'auto';
+    if (t !== 'auto') root.setAttribute('data-theme', t);
+    else if (hostTheme) root.setAttribute('data-theme', hostTheme);
+    else root.removeAttribute('data-theme');
+    $('theme').textContent = THEMES[t];
+  }
+  $('theme').onclick = () => {
+    const order = ['auto', 'light', 'dark'];
+    state.theme = order[(order.indexOf(state.theme || 'auto') + 1) % 3];
+    applyTheme(); save();
+  };
+  applyTheme();
 
   show();
 })();
