@@ -129,6 +129,19 @@ dialog .grow { flex: 1; }
 .mirror .dim { color: var(--dim); transition: color .15s; }
 @media (max-width: 700px) { .ed { font-size: 16px; } }
 
+/* ---------- mind map ---------- */
+.maps-head { margin-top: 12px; }
+.scroll.map-scroll { overflow: auto; padding-block: 20px 60px; }
+.map-hint { color: var(--muted); font-size: 12.5px; margin: 0 0 20px; }
+.map { position: relative; min-height: 200px; }
+.map svg { position: absolute; left: 0; top: 0; pointer-events: none; }
+.map path { fill: none; stroke: var(--dim); stroke-width: 1.5; }
+.node { position: absolute; width: max-content; max-width: 240px; min-width: 30px; min-height: 34px; font-family: var(--mono); font-size: 16px; line-height: 1.4; padding: 5px 2px; border-bottom: 1.5px solid var(--dim); outline: none; white-space: pre-wrap; overflow-wrap: break-word; cursor: text; caret-color: var(--accent); }
+.node.d0 { background: var(--fg); color: var(--bg); caret-color: var(--bg); font-weight: 600; border: 0; border-radius: 8px; padding: 9px 16px; }
+.node.d1 { background: var(--accent-soft); border: 0; border-radius: 7px; padding: 6px 12px; }
+.node:focus { box-shadow: 0 0 0 2px var(--accent); }
+.node:empty::before { content: attr(data-ph); opacity: .5; }
+
 /* ---------- gratitude ---------- */
 .grat { max-width: 600px; margin-inline: auto; display: flex; flex-direction: column; gap: 34px; }
 .g-head { display: flex; flex-direction: column; gap: 6px; }
@@ -190,9 +203,11 @@ dialog .grow { flex: 1; }
     </button>
 
     <div class="docs-wrap">
+      <input id="search" type="search" placeholder="Rechercher" aria-label="Rechercher dans les documents et les cartes">
       <div class="rail-head"><span class="label">Documents</span><button class="new" id="newDoc">+ Nouveau</button></div>
-      <input id="search" type="search" placeholder="Rechercher" aria-label="Rechercher dans les documents">
       <ul class="docs" id="docs"></ul>
+      <div class="rail-head maps-head"><span class="label">Cartes mentales</span><button class="new" id="newMap">+ Nouvelle</button></div>
+      <ul class="docs" id="maps"></ul>
     </div>
 
     <div class="rail-foot">
@@ -229,6 +244,9 @@ dialog .grow { flex: 1; }
       <div class="seg" id="focusSeg" role="group" aria-label="Mode focus">
         <button data-f="off">Tout</button><button data-f="sentence">Phrase</button><button data-f="paragraph">Paragraphe</button>
       </div>
+      <div class="seg" id="mapTools" role="group" aria-label="Outils de la carte" hidden>
+        <button id="mChild">+ Sous-idée</button><button id="mSib">+ Idée voisine</button><button id="mRemove">Retirer</button><button id="mDoc">En faire un document</button>
+      </div>
       <span class="grow"></span>
       <button class="theme" id="theme" title="Changer de thème"></button>
       <span class="count" id="count"></span>
@@ -240,6 +258,11 @@ dialog .grow { flex: 1; }
         <div class="mirror" id="mirror" aria-hidden="true"></div>
         <textarea id="editor" spellcheck="true" placeholder="Écrivez…" aria-label="Texte du document"></textarea>
       </div>
+    </div>
+
+    <div class="scroll map-scroll" id="mapView" hidden>
+      <p class="map-hint">Tab : sous-idée · Entrée : idée voisine · Retour arrière sur une idée vide : la retirer</p>
+      <div class="map" id="mapCanvas"><svg id="mapSvg" aria-hidden="true"></svg></div>
     </div>
 
     <div class="scroll grat-scroll" id="gratView" hidden>
@@ -315,6 +338,17 @@ dialog .grow { flex: 1; }
         [shift(t, -1)]: { example: true, items: ["Le café pris au soleil avant de commencer la journée", "Un message inattendu d'une vieille amie", "Avoir terminé le chapitre qui me résistait"], note: "" },
         [shift(t, -2)]: { example: true, items: ["La pluie qui a fini juste à temps pour la promenade", "Le pain encore chaud de la boulangerie", "Une soirée sans écran"], note: "Les petites choses reviennent plus souvent que les grandes." }
       },
+      maps: [
+        { id: uid(), updated: Date.now() - 864e5, root: { id: uid(), text: "Nouvelle : le train de nuit", children: [
+          { id: uid(), text: "Personnages", children: [
+            { id: uid(), text: "La contrôleuse qui ne dort jamais", children: [] },
+            { id: uid(), text: "Le passager sans billet", children: [] } ] },
+          { id: uid(), text: "Lieux", children: [
+            { id: uid(), text: "Le wagon-bar", children: [] },
+            { id: uid(), text: "Un quai désert à 3 h", children: [] } ] },
+          { id: uid(), text: "Fin possible", children: [
+            { id: uid(), text: "Personne ne descend", children: [] } ] } ] } }
+      ],
       focus: 'off',
       current: null,
       side: true
@@ -325,6 +359,7 @@ dialog .grow { flex: 1; }
   try { state = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
   if (!state || !Array.isArray(state.docs)) { state = seed(); state.current = state.docs[0].id; if (narrow()) state.side = false; }
   state.grat = state.grat || {};
+  state.maps = Array.isArray(state.maps) ? state.maps : [];
   let gDay = today();
   let saveT;
   const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }, 250); };
@@ -390,6 +425,13 @@ dialog .grow { flex: 1; }
       return '<li><button data-id="' + d.id + '" aria-current="' + (d.id === state.current) + '"><span class="t">' + esc(titleOf(d)) +
         '</span><span class="m">' + when + ' · ' + w + ' mot' + (w > 1 ? 's' : '') + '</span></button></li>';
     }).join('') : '<li class="empty">' + (q ? 'Aucun document ne contient « ' + esc(q) + ' ».' : 'Aucun document. Créez-en un avec « + Nouveau ».') + '</li>';
+    const maps = state.maps.slice().sort((x, y) => y.updated - x.updated).filter(m => !q || mapText(m).toLowerCase().includes(q));
+    $('maps').innerHTML = maps.length ? maps.map(m => {
+      const when = new Date(m.updated).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      const c = countNodes(m.root);
+      return '<li><button data-id="' + m.id + '" aria-current="' + (m.id === state.current) + '"><span class="t">' + esc(m.root.text.trim() || 'Sans titre') +
+        '</span><span class="m">' + when + ' · ' + c + ' idée' + (c > 1 ? 's' : '') + '</span></button></li>';
+    }).join('') : '<li class="empty">' + (q ? 'Aucune carte ne correspond.' : 'Aucune carte pour l\'instant.') + '</li>';
     const n = streak();
     $('gratLink').setAttribute('aria-current', state.current === 'gratitude');
     $('gratTodo').hidden = filled(today());
@@ -404,13 +446,13 @@ dialog .grow { flex: 1; }
 
   /* ---------- views ---------- */
   function show() {
-    const g = state.current === 'gratitude';
-    if (!g && !doc()) { if (!state.docs.length) newDoc(true); else state.current = state.docs[0].id; }
-    $('docView').hidden = g; $('gratView').hidden = !g;
-    $('focusSeg').hidden = g; $('del').hidden = g; $('count').hidden = g;
+    const g = state.current === 'gratitude', m = !g && !!curMap();
+    if (!g && !m && !doc()) { if (!state.docs.length) newDoc(true); else state.current = state.docs[0].id; }
+    $('docView').hidden = g || m; $('gratView').hidden = !g; $('mapView').hidden = !m;
+    $('focusSeg').hidden = g || m; $('mapTools').hidden = !m; $('del').hidden = g; $('count').hidden = g;
     $('app').classList.toggle('closed', !state.side);
     document.querySelectorAll('#focusSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.f === state.focus));
-    if (g) renderGrat(); else { editor.value = doc().text; paint(); renderCount(); }
+    if (g) renderGrat(); else if (m) buildMap(); else { editor.value = doc().text; paint(); renderCount(); }
     renderRail();
   }
   function open(id) { state.current = id; if (narrow()) state.side = false; resetDel(); show(); save(); }
@@ -419,6 +461,125 @@ dialog .grow { flex: 1; }
     state.docs.push(d); state.current = d.id;
     if (!silent) { if (narrow()) state.side = false; show(); save(); editor.focus(); }
   }
+
+  /* ---------- mind map ---------- */
+  const mapEl = $('mapCanvas'), mapSvg = $('mapSvg');
+  let selId = null;
+  const curMap = () => state.maps.find(m => m.id === state.current);
+  function walk(n, fn, parent, depth) { depth = depth || 0; fn(n, parent || null, depth); n.children.forEach(c => walk(c, fn, n, depth + 1)); }
+  function findNode(root, id) { let r = null; walk(root, (n, p) => { if (n.id === id) r = { n, p }; }); return r; }
+  function countNodes(root) { let c = 0; walk(root, () => c++); return c; }
+  function mapText(m) { const t = []; walk(m.root, n => t.push(n.text)); return t.join(' '); }
+  const nodeEl = id => mapEl.querySelector('.node[data-id="' + id + '"]');
+  function mapCount() { const m = curMap(); if (!m) return; const c = countNodes(m.root); $('count').textContent = c + ' idée' + (c > 1 ? 's' : ''); }
+
+  function buildMap(focusId) {
+    const m = curMap(); if (!m) return;
+    mapEl.querySelectorAll('.node').forEach(e => e.remove());
+    walk(m.root, (n, p, d) => {
+      const el = document.createElement('div');
+      el.className = 'node d' + Math.min(d, 2);
+      el.contentEditable = 'true';
+      el.dataset.id = n.id; el.dataset.ph = d ? 'Idée' : 'Idée centrale';
+      el.setAttribute('role', 'textbox'); el.setAttribute('aria-label', d ? 'Idée' : 'Idée centrale');
+      el.textContent = n.text;
+      mapEl.appendChild(el);
+    });
+    layoutMap(); mapCount();
+    const el = focusId && nodeEl(focusId);
+    if (el) {
+      el.focus();
+      const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  }
+
+  // Tree grows to the right; each node is centred on the block its children occupy.
+  function layoutMap() {
+    const m = curMap(); if (!m) return;
+    const VG = 14, HG = 56, PAD = 8, size = {}, bh = {};
+    walk(m.root, n => { const e = nodeEl(n.id); size[n.id] = { w: e.offsetWidth, h: e.offsetHeight }; });
+    const kidsH = n => n.children.reduce((s, c, i) => s + bh[c.id] + (i ? VG : 0), 0);
+    const block = n => { n.children.forEach(block); return bh[n.id] = Math.max(size[n.id].h, kidsH(n)); };
+    block(m.root);
+    let paths = '', maxX = 0;
+    const place = (n, x, top) => {
+      const s = size[n.id], y = top + (bh[n.id] - s.h) / 2, e = nodeEl(n.id);
+      e.style.left = x + 'px'; e.style.top = y + 'px';
+      maxX = Math.max(maxX, x + s.w);
+      let cy = top + (bh[n.id] - kidsH(n)) / 2;
+      n.children.forEach(c => {
+        const x1 = x + s.w, cx = x1 + HG, mx = x1 + HG / 2, y1 = y + s.h / 2, y2 = cy + bh[c.id] / 2;
+        place(c, cx, cy);
+        paths += '<path d="M' + x1 + ' ' + y1 + 'C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + cx + ' ' + y2 + '"/>';
+        cy += bh[c.id] + VG;
+      });
+    };
+    place(m.root, PAD, PAD);
+    const W = maxX + 160, H = bh[m.root.id] + PAD * 2;
+    mapEl.style.width = W + 'px'; mapEl.style.height = H + 'px';
+    mapSvg.setAttribute('width', W); mapSvg.setAttribute('height', H);
+    mapSvg.innerHTML = paths;
+  }
+
+  function touchMap() { curMap().updated = Date.now(); renderRail(); save(); }
+  function addChild(id) {
+    const m = curMap(), f = findNode(m.root, id) || { n: m.root };
+    const c = { id: uid(), text: '', children: [] };
+    f.n.children.push(c); buildMap(c.id); touchMap();
+  }
+  function addSibling(id) {
+    const m = curMap(), f = findNode(m.root, id);
+    if (!f || !f.p) return addChild(m.root.id);
+    const c = { id: uid(), text: '', children: [] };
+    f.p.children.splice(f.p.children.indexOf(f.n) + 1, 0, c); buildMap(c.id); touchMap();
+  }
+  // Removing an idea keeps its sub-ideas: they move up one level, in place.
+  function removeNode(id) {
+    const m = curMap(), f = findNode(m.root, id);
+    if (!f || !f.p) return;
+    const i = f.p.children.indexOf(f.n);
+    f.p.children.splice(i, 1, ...f.n.children);
+    buildMap(i > 0 ? f.p.children[i - 1].id : f.p.id); touchMap();
+  }
+  function mapToDoc() {
+    const m = curMap(); let out = '# ' + (m.root.text.trim() || 'Sans titre') + '\n';
+    const rec = (n, d) => { out += d === 1 ? '\n## ' + n.text + '\n\n' : '  '.repeat(d - 2) + '- ' + n.text + '\n'; n.children.forEach(c => rec(c, d + 1)); };
+    m.root.children.forEach(c => rec(c, 1));
+    const d = { id: uid(), text: out, updated: Date.now() };
+    state.docs.push(d); open(d.id);
+  }
+  function newMap() {
+    const m = { id: uid(), updated: Date.now(), root: { id: uid(), text: '', children: [] } };
+    state.maps.push(m); open(m.id); buildMap(m.root.id);
+  }
+
+  mapEl.addEventListener('focusin', e => { if (e.target.dataset && e.target.dataset.id) selId = e.target.dataset.id; });
+  mapEl.addEventListener('input', e => {
+    const el = e.target, f = el.dataset && findNode(curMap().root, el.dataset.id); if (!f) return;
+    f.n.text = el.textContent.replace(/\n/g, ' ');
+    if (!f.n.text) el.innerHTML = '';
+    layoutMap(); touchMap();
+  });
+  mapEl.addEventListener('keydown', e => {
+    const id = e.target.dataset && e.target.dataset.id; if (!id) return;
+    if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); addChild(id); }
+    else if (e.key === 'Enter') { e.preventDefault(); addSibling(id); }
+    else if (e.key === 'Backspace' && !e.target.textContent) { e.preventDefault(); removeNode(id); }
+  });
+  mapEl.addEventListener('paste', e => {
+    e.preventDefault();
+    const t = (e.clipboardData.getData('text/plain') || '').replace(/\s+/g, ' ');
+    document.execCommand('insertText', false, t);
+  });
+  const selOrRoot = () => { const m = curMap(); return selId && findNode(m.root, selId) ? selId : m.root.id; };
+  $('mChild').onclick = () => addChild(selOrRoot());
+  $('mSib').onclick = () => addSibling(selOrRoot());
+  $('mRemove').onclick = () => removeNode(selOrRoot());
+  $('mDoc').onclick = mapToDoc;
+  $('newMap').onclick = newMap;
+  $('maps').onclick = e => { const b = e.target.closest('button[data-id]'); if (b) open(b.dataset.id); };
 
   /* ---------- gratitude ---------- */
   const gFields = [$('g1'), $('g2'), $('g3')];
@@ -505,22 +666,28 @@ dialog .grow { flex: 1; }
     const b = $('del');
     if (!b.classList.contains('sure')) { b.classList.add('sure'); b.textContent = 'Confirmer la suppression'; delT = setTimeout(resetDel, 3000); return; }
     resetDel();
-    state.docs = state.docs.filter(d => d.id !== state.current); state.current = null; show(); save();
+    state.docs = state.docs.filter(d => d.id !== state.current); state.maps = state.maps.filter(m => m.id !== state.current); state.current = null; show(); save();
   };
 
   /* ---------- backup ---------- */
   const bk = $('backup');
   const bkMsg = (t, err) => { $('bkMsg').textContent = t; $('bkMsg').classList.toggle('err', !!err); };
-  const backupText = () => JSON.stringify({ app: 'encre', version: 1, exported: new Date().toISOString(), docs: state.docs, grat: state.grat }, null, 2);
+  const backupText = () => JSON.stringify({ app: 'encre', version: 1, exported: new Date().toISOString(), docs: state.docs, maps: state.maps, grat: state.grat }, null, 2);
   function restore(text) {
     let data;
     try { data = JSON.parse(text); } catch (e) { return bkMsg('Ce texte n\'est pas une sauvegarde Encre lisible.', true); }
     if (!data || !Array.isArray(data.docs) || typeof data.grat !== 'object' || !data.grat) return bkMsg('Ce fichier ne contient pas de sauvegarde Encre.', true);
-    let nd = 0, ng = 0;
+    let nd = 0, ng = 0, nm = 0;
     data.docs.forEach(d => {
       if (!d || typeof d.text !== 'string') return;
       const mine = state.docs.find(x => x.id === d.id), inc = { id: d.id || uid(), text: d.text, updated: Number(d.updated) || Date.now() };
       if (!mine) { state.docs.push(inc); nd++; } else if (inc.updated > mine.updated) { Object.assign(mine, inc); nd++; }
+    });
+    const clean = n => ({ id: String(n.id || uid()), text: String(n.text || ''), children: (Array.isArray(n.children) ? n.children : []).map(clean) });
+    (Array.isArray(data.maps) ? data.maps : []).forEach(m => {
+      if (!m || !m.root) return;
+      const mine = state.maps.find(x => x.id === m.id), inc = { id: m.id || uid(), updated: Number(m.updated) || Date.now(), root: clean(m.root) };
+      if (!mine) { state.maps.push(inc); nm++; } else if (inc.updated > mine.updated) { Object.assign(mine, inc); nm++; }
     });
     Object.keys(data.grat).forEach(k => {
       const e = data.grat[k];
@@ -530,7 +697,7 @@ dialog .grow { flex: 1; }
       ng++;
     });
     show(); save();
-    bkMsg('Restauré : ' + nd + ' document' + (nd > 1 ? 's' : '') + ' et ' + ng + ' jour' + (ng > 1 ? 's' : '') + ' de carnet.');
+    bkMsg('Restauré : ' + nd + ' document' + (nd > 1 ? 's' : '') + ', ' + nm + ' carte' + (nm > 1 ? 's' : '') + ' et ' + ng + ' jour' + (ng > 1 ? 's' : '') + ' de carnet.');
   }
   $('bkOpen').onclick = () => { bkMsg(''); $('bkText').value = ''; $('bkFile').value = ''; bk.showModal(); };
   $('bkClose').onclick = () => bk.close();
